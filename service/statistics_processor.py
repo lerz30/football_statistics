@@ -45,7 +45,6 @@ statistics = raw_statistics_df\
     .withColumnRenamed("HR", "home_red")\
     .withColumnRenamed("AR", "away_red")
 statistics.printSchema()
-statistics.limit(5).show()
 
 '''
 TEAMS STATISTICS
@@ -61,25 +60,21 @@ away_matches = statistics\
     .groupBy("AwayTeam")\
     .count()\
     .withColumnRenamed("AwayTeam", "Team")\
-    .withColumnRenamed("count", "Away_matches")
+    .withColumnRenamed("count", "Away_matches")\
+    .repartition("Team")
 
 total_matches = home_matches\
     .join(away_matches, "Team", "inner")\
     .withColumn("matches_played", home_matches.Home_matches + away_matches.Away_matches)\
     .drop("Home_matches")\
     .drop("Away_matches")
-total_matches.printSchema()
 
-#
-# Wins statistics
-#
 home_wins = statistics\
     .where(statistics.FT_result == "H")\
     .groupBy("HomeTeam")\
     .count()\
     .withColumnRenamed("count", "home_wins")\
     .withColumnRenamed("HomeTeam", "Team")
-home_wins.printSchema()
 
 away_wins = statistics\
     .where(statistics.FT_result == "A")\
@@ -87,28 +82,19 @@ away_wins = statistics\
     .count()\
     .withColumnRenamed("count", "away_wins")\
     .withColumnRenamed("AwayTeam", "Team")
-away_wins.printSchema()
 
-wins_stats = home_wins\
+wins_stats = total_matches \
+    .join(home_wins, "Team", "inner") \
     .join(away_wins, "Team", "inner")\
-    .withColumn("total_wins", home_wins.home_wins + away_wins.away_wins)
-wins_stats.printSchema()
+    .withColumn("total_wins", home_wins.home_wins + away_wins.away_wins)\
+    .withColumn("Win %", ("total_wins"*100)/total_matches.matches_played)
 
-wins_stats = total_matches\
-    .join(wins_stats, "Team", "inner")\
-    .withColumn("Win %", (wins_stats.total_wins*100)/total_matches.matches_played)
-wins_stats.printSchema()
-
-#
-# Draws statistics
-#
 home_draws = statistics\
     .where(statistics.FT_result == "D")\
     .groupBy("HomeTeam")\
     .count()\
     .withColumnRenamed("count", "home_draws")\
     .withColumnRenamed("HomeTeam", "Team")
-home_draws.printSchema()
 
 away_draws = statistics\
     .where(statistics.FT_result == "D")\
@@ -116,7 +102,6 @@ away_draws = statistics\
     .count()\
     .withColumnRenamed("count", "away_draws")\
     .withColumnRenamed("AwayTeam", "Team")
-away_draws.printSchema()
 
 draw_stats = home_draws\
     .join(away_draws, "Team", "inner")\
@@ -128,10 +113,12 @@ games_table = wins_stats\
     .join(draw_stats, "Team", "inner")\
     .withColumn("Draw %", (draw_stats.total_draws*100)/wins_stats.matches_played)\
     .orderBy("total_wins", ascending=False)\
-    .show()
+    .coalesce(1)\
+    .write\
+    .format('csv').save("../tmp/EPL_games_stats.csv", header='true')
 
 
-
+'''
 #
 # Goals statistics
 #
@@ -164,7 +151,7 @@ goals_stats = goals_stats\
     .orderBy("goal_dif", ascending = False)\
     .show()
 
-
+'''
 
 
 
