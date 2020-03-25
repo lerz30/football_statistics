@@ -2,20 +2,18 @@ from pyspark.sql import *
 
 
 def create_spark_session():
-    ss = SparkSession \
+   return SparkSession \
         .builder \
         .appName("English Premier League match statistics") \
         .getOrCreate()
-    return ss
 
 
 def read_raw_data(ss):
-
-#First look at our schema
+    #First look at our schema
     raw_statistics_df = ss.read.json("../data/*.json")
     raw_statistics_df.printSchema()
 
-#Columns to delete from our DF
+    #Columns to delete from our DF
     columns_to_drop = ["BSH", "BSD", "BSA", "BWH", "BWD", "BWA", "GBH", "GBD", "GBA", "IWH", "IWD", "IWA", "LBH", "LBD",
                        "SOH", "SOD", "SOA", "SBH", "SBD", "SBA", "SJH", "SJD", "SJA", "SYH", "SYD", "SYA", "VCH", "VCD",
                        "VCA", "B365H", "B365D", "B365A", "Bb1X2", "BbMxH", "BbAvH", "BbMxD", "BbAvD", "BbMxA", "BbAvA",
@@ -23,7 +21,7 @@ def read_raw_data(ss):
                        "BbMxAHA", "BbAvAHA", "BbMx>2.5", "ABP", "HBP", "WHH", "WHD", "WHA", "PSH", "PSD", "PSCH",
                        "PSCD", "PSCA", "PSA", "LBA"]
 
-#Keeping match statistics columns only and renaming them
+    #Keeping match statistics columns only and renaming them
     statistics = raw_statistics_df\
         .drop(*columns_to_drop)\
         .withColumnRenamed("FTHG", "FT_homeGoals")\
@@ -54,8 +52,8 @@ def read_raw_data(ss):
     statistics.printSchema()
     return statistics
 
-def played_games_df(statistics):
 
+def played_games_df(statistics):
     home_matches = statistics \
         .groupBy("HomeTeam") \
         .count() \
@@ -68,16 +66,14 @@ def played_games_df(statistics):
         .withColumnRenamed("AwayTeam", "Team") \
         .withColumnRenamed("count", "Away_matches")
 
-    total_matches = home_matches \
+    return home_matches \
         .join(away_matches, "Team", "inner") \
         .withColumn("matches_played", home_matches.Home_matches + away_matches.Away_matches) \
         .drop("Home_matches") \
         .drop("Away_matches")
 
-    return total_matches
 
 def won_games_df(statistics):
-
     total_matches = played_games_df(statistics)
 
     home_wins = statistics \
@@ -94,13 +90,11 @@ def won_games_df(statistics):
         .withColumnRenamed("count", "away_wins") \
         .withColumnRenamed("AwayTeam", "Team")
 
-    wins_stats = total_matches \
+    return total_matches \
         .join(home_wins, "Team", "inner") \
         .join(away_wins, "Team", "inner") \
         .withColumn("total_wins", home_wins.home_wins + away_wins.away_wins) \
         .withColumn("Win %", ("total_wins" * 100) / total_matches.matches_played)
-
-    return wins_stats
 
 
 def tied_games_df(statistics):
@@ -118,15 +112,12 @@ def tied_games_df(statistics):
         .withColumnRenamed("count", "away_draws") \
         .withColumnRenamed("AwayTeam", "Team")
 
-    draw_stats = home_draws \
+    return home_draws \
         .join(away_draws, "Team", "inner") \
         .withColumn("total_draws", home_draws.home_draws + away_draws.away_draws)
 
-    return draw_stats
 
-
-def generate_matches_table(statistics):
-
+def generate_matches_statistics(statistics):
     wins_stats = won_games_df(statistics)
     draw_stats = tied_games_df(statistics)
 
@@ -139,69 +130,76 @@ def generate_matches_table(statistics):
         .format('csv').save("../tmp/EPL_games_stats.csv", header='true')
 
 
+def calculate_goals_stats(statistics):
+    home_team_goals = statistics \
+        .select("HomeTeam", "FT_homeGoals", "FT_awayGoals") \
+        .groupBy("HomeTeam") \
+        .sum("FT_homeGoals", "FT_awayGoals") \
+        .withColumnRenamed("HomeTeam", "Team") \
+        .withColumnRenamed("sum(FT_homeGoals)", "home_scored") \
+        .withColumnRenamed("sum(FT_awayGoals)", "home_received")
 
-'''
-#
-# Goals statistics
-#
-home_team_goals = statistics\
-    .select("HomeTeam", "FT_homeGoals", "FT_awayGoals")\
-    .groupBy("HomeTeam")\
-    .sum("FT_homeGoals", "FT_awayGoals")\
-    .withColumnRenamed("HomeTeam", "Team")\
-    .withColumnRenamed("sum(FT_homeGoals)", "home_scored")\
-    .withColumnRenamed("sum(FT_awayGoals)", "home_received")
-home_team_goals.printSchema()
+    away_team_goals = statistics \
+        .select("AwayTeam", "FT_homeGoals", "FT_awayGoals") \
+        .groupBy("AwayTeam") \
+        .sum("FT_homeGoals", "FT_awayGoals") \
+        .withColumnRenamed("AwayTeam", "Team") \
+        .withColumnRenamed("sum(FT_homeGoals)", "away_received") \
+        .withColumnRenamed("sum(FT_awayGoals)", "away_scored")
 
-away_team_goals = statistics\
-    .select("AwayTeam", "FT_homeGoals", "FT_awayGoals")\
-    .groupBy("AwayTeam")\
-    .sum("FT_homeGoals", "FT_awayGoals")\
-    .withColumnRenamed("AwayTeam", "Team")\
-    .withColumnRenamed("sum(FT_homeGoals)", "away_received")\
-    .withColumnRenamed("sum(FT_awayGoals)", "away_scored")
-away_team_goals.printSchema()
-
-goals_stats = home_team_goals\
-    .join(away_team_goals, "Team", "inner")\
-    .withColumn("total_scored", home_team_goals.home_scored + away_team_goals.away_scored)\
-    .withColumn("total_received", home_team_goals.home_received + away_team_goals.away_received)
-goals_stats.printSchema()
-
-goals_stats = goals_stats\
-    .withColumn("goal_dif", goals_stats.total_scored - goals_stats.total_received)\
-    .orderBy("goal_dif", ascending = False)\
-    .show()
-
-'''
-
-'''
-Referees statistics and analysis
+    return home_team_goals \
+        .join(away_team_goals, "Team", "inner") \
+        .withColumn("total_scored", home_team_goals.home_scored + away_team_goals.away_scored) \
+        .withColumn("total_received", home_team_goals.home_received + away_team_goals.away_received) \
+        .withColumn("goal_diff", (home_team_goals.home_scored + away_team_goals.away_scored) -
+                    (home_team_goals.home_received + away_team_goals.away_received))\
+        .orderBy("goal_diff", ascending=False)
 
 
-referees = statistics\
-    .select("Referee")\
-    .distinct()\
-    .count()
-print(referees)
+def calculate_shots_stats(statistics):
+    home_shots_stats_df = statistics \
+        .select("HomeTeam", "home_shots", "home_shotsOT") \
+        .groupBy("HomeTeam") \
+        .sum("home_shots", "home_shotsOT") \
+        .withColumnRenamed("sum(home_shots)", "total_home_shots") \
+        .withColumnRenamed("sum(home_shotsOT)", "total_home_shotsOT") \
+        .withColumnRenamed("HomeTeam", "Team")
 
-most_referred_games = statistics\
-    .groupBy("Referee")\
-    .count()\
-    .withColumnRenamed("count", "matches")\
-    .orderBy("matches", ascending = False)\
-    .limit(40)\
-    .show()
+    away_total_shots_df = statistics \
+        .select("AwayTeam", "away_shots", "away_shotsOT") \
+        .groupBy("AwayTeam") \
+        .sum("away_shots", "away_shotsOT") \
+        .withColumnRenamed("sum(away_shots)", "total_away_shots") \
+        .withColumnRenamed("sum(away_shotsOT)", "total_away_shotsOT") \
+        .withColumnRenamed("AwayTeam", "Team")
 
-least_referred_games = statistics\
-    .groupBy("Referee")\
-    .count()\
-    .withColumnRenamed("count", "matches")\
-    .orderBy("matches")\
-    .limit(10)\
-    .show()
-'''
+    return home_shots_stats_df.join(away_total_shots_df, "Team", "inner") \
+        .withColumn("total_shots", home_shots_stats_df.total_home_shots + away_total_shots_df.total_away_shots) \
+        .withColumn("total_shotsOT", home_shots_stats_df.total_home_shotsOT + away_total_shots_df.total_away_shotsOT) \
+        .drop("total_home_shots", "total_home_shotsOT", "total_away_shots", "total_away_shotsOT")
+
+
+def generate_goals_statistics(statistics):
+    goals_stats_df = calculate_goals_stats(statistics)
+    goals_stats_df\
+        .coalesce(1) \
+        .write \
+        .format('csv').save("../tmp/EPL_goals_stats.csv", header='true')
+
+    shots_stats_df = calculate_shots_stats(statistics)
+    shots_stats_df.join(goals_stats_df, "Team", "inner")\
+        .withColumn("shots_accuracy", (goals_stats_df.total_scored*100)/shots_stats_df.total_shots)\
+        .drop("home_scored", "home_received", "away_received", "away_scored", "total_received", "goal_diff")\
+        .orderBy("shots_accuracy", ascending=False) \
+        .coalesce(1) \
+        .write \
+        .format('csv').save("../tmp/EPL_shots_stats.csv", header='true')
+
+
+
 
 ss = create_spark_session()
-statistics = read_raw_data(ss)
-generate_matches_table(statistics)
+statistics_df = read_raw_data(ss)
+statistics_df.limit(5).show()
+generate_matches_statistics(statistics_df)
+generate_goals_statistics(statistics_df)
