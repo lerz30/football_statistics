@@ -94,7 +94,7 @@ def won_games_df(statistics):
         .join(home_wins, "Team", "inner") \
         .join(away_wins, "Team", "inner") \
         .withColumn("total_wins", home_wins.home_wins + away_wins.away_wins) \
-        .withColumn("Win %", ("total_wins" * 100) / total_matches.matches_played)
+        .withColumn("Win %", ((home_wins.home_wins + away_wins.away_wins)*100)/total_matches.matches_played)
 
 
 def tied_games_df(statistics):
@@ -117,7 +117,7 @@ def tied_games_df(statistics):
         .withColumn("total_draws", home_draws.home_draws + away_draws.away_draws)
 
 
-def generate_matches_statistics(statistics, team):
+def generate_matches_statistics(statistics, team, league):
     wins_stats = won_games_df(statistics)
     draw_stats = tied_games_df(statistics)
 
@@ -125,13 +125,13 @@ def generate_matches_statistics(statistics, team):
         wins_stats = wins_stats.where(wins_stats.Team == team)
         draw_stats = draw_stats.where(draw_stats.Team == team)
 
-    wins_stats\
+    result_df = wins_stats\
         .join(draw_stats, "Team", "inner")\
         .withColumn("Draw %", (draw_stats.total_draws*100)/wins_stats.matches_played)\
-        .orderBy("total_wins", ascending=False)\
-        .coalesce(1)\
-        .write\
-        .format('csv').save("../tmp/EPL_games_stats.csv", header='true')
+        .orderBy("total_wins", ascending=False)
+    result_df.limit(10).show()
+    result_df.coalesce(1).write.format('csv').save("../tmp/" + league + "/games_stats.csv", header='true')
+
 
 
 def calculate_goals_stats(statistics):
@@ -183,7 +183,7 @@ def calculate_shots_stats(statistics):
         .drop("total_home_shots", "total_home_shotsOT", "total_away_shots", "total_away_shotsOT")
 
 
-def generate_goals_statistics(statistics, team):
+def generate_goals_statistics(statistics, team, league):
     goals_stats_df = calculate_goals_stats(statistics)
     shots_stats_df = calculate_shots_stats(statistics)
 
@@ -191,29 +191,25 @@ def generate_goals_statistics(statistics, team):
         goals_stats_df = goals_stats_df.where(goals_stats_df.Team == team)
         shots_stats_df = shots_stats_df.where(shots_stats_df.Team == team)
 
-    goals_stats_df\
-        .coalesce(1) \
-        .write \
-        .format('csv').save("../tmp/EPL_goals_stats.csv", header='true')
+    goals_stats_df.limit(10).show()
+    goals_stats_df.coalesce(1).write.format('csv').save("../tmp/" + league + "/goals_stats.csv", header='true')
 
-    shots_stats_df.join(goals_stats_df, "Team", "inner")\
+    result_df = shots_stats_df.join(goals_stats_df, "Team", "inner")\
         .withColumn("shots_accuracy", (goals_stats_df.total_scored*100)/shots_stats_df.total_shots)\
         .drop("home_scored", "home_received", "away_received", "away_scored", "total_received", "goal_diff")\
-        .orderBy("shots_accuracy", ascending=False) \
-        .coalesce(1) \
-        .write \
-        .format('csv').save("../tmp/EPL_shots_stats.csv", header='true')
+        .orderBy("shots_accuracy", ascending=False)
+    result_df.limit(10).show()
+    result_df.coalesce(1).write.format('csv').save("../tmp/" + league + "/shots_stats.csv", header='true')
 
-
-def generate_disciplinary_statistics(statistics_df):
-    pass
 
 ss = create_spark_session()
-statistics_df = read_raw_data(ss, ui.user_interface.get_league())
-statistics_df.limit(5).show()
 
-team = ui.user_interface.get_team(statistics_df.select("HomeTeam").distinct().orderBy("HomeTeam").collect())
-if team is not None:
-    generate_matches_statistics(statistics_df, team)
-    generate_goals_statistics(statistics_df, team)
-#generate_disciplinary_statistics(statistics_df)
+league = ui.user_interface.get_league()
+if league is not None:
+    statistics_df = read_raw_data(ss, league)
+    statistics_df.limit(5).show()
+
+    team = ui.user_interface.get_team(statistics_df.select("HomeTeam").distinct().orderBy("HomeTeam").collect())
+    if team is not None:
+        generate_matches_statistics(statistics_df, team, league)
+        generate_goals_statistics(statistics_df, team, league)

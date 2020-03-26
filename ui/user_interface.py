@@ -1,5 +1,12 @@
 def get_league():
-    return (str(input("Choose a league: \n")))
+    leagues = ["bundesliga", "epl", "la_liga", "ligue-1"]
+    print("Choose a league:\n")
+    for league in leagues:
+        print(league)
+    league_input = input()
+    if league_input not in leagues:
+        return None
+    return league_input
 
 
 def get_team(teams):
