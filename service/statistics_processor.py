@@ -1,5 +1,5 @@
 from pyspark.sql import *
-
+import ui.user_interface
 
 def create_spark_session():
    return SparkSession \
@@ -8,12 +8,12 @@ def create_spark_session():
         .getOrCreate()
 
 
-def read_raw_data(ss):
-    #First look at our schema
-    raw_statistics_df = ss.read.json("../data/*.json")
+def read_raw_data(ss, league):
+    # First look at our schema
+    raw_statistics_df = ss.read.json("../data/" + league + "/*.json")
     raw_statistics_df.printSchema()
 
-    #Columns to delete from our DF
+    # Columns to delete from our DF
     columns_to_drop = ["BSH", "BSD", "BSA", "BWH", "BWD", "BWA", "GBH", "GBD", "GBA", "IWH", "IWD", "IWA", "LBH", "LBD",
                        "SOH", "SOD", "SOA", "SBH", "SBD", "SBA", "SJH", "SJD", "SJA", "SYH", "SYD", "SYA", "VCH", "VCD",
                        "VCA", "B365H", "B365D", "B365A", "Bb1X2", "BbMxH", "BbAvH", "BbMxD", "BbAvD", "BbMxA", "BbAvA",
@@ -21,7 +21,7 @@ def read_raw_data(ss):
                        "BbMxAHA", "BbAvAHA", "BbMx>2.5", "ABP", "HBP", "WHH", "WHD", "WHA", "PSH", "PSD", "PSCH",
                        "PSCD", "PSCA", "PSA", "LBA"]
 
-    #Keeping match statistics columns only and renaming them
+    # Keeping match statistics columns only and renaming them
     statistics = raw_statistics_df\
         .drop(*columns_to_drop)\
         .withColumnRenamed("FTHG", "FT_homeGoals")\
@@ -117,9 +117,13 @@ def tied_games_df(statistics):
         .withColumn("total_draws", home_draws.home_draws + away_draws.away_draws)
 
 
-def generate_matches_statistics(statistics):
+def generate_matches_statistics(statistics, team):
     wins_stats = won_games_df(statistics)
     draw_stats = tied_games_df(statistics)
+
+    if team != "*":
+        wins_stats = wins_stats.where(wins_stats.Team == team)
+        draw_stats = draw_stats.where(draw_stats.Team == team)
 
     wins_stats\
         .join(draw_stats, "Team", "inner")\
@@ -179,14 +183,19 @@ def calculate_shots_stats(statistics):
         .drop("total_home_shots", "total_home_shotsOT", "total_away_shots", "total_away_shotsOT")
 
 
-def generate_goals_statistics(statistics):
+def generate_goals_statistics(statistics, team):
     goals_stats_df = calculate_goals_stats(statistics)
+    shots_stats_df = calculate_shots_stats(statistics)
+
+    if team != "*":
+        goals_stats_df = goals_stats_df.where(goals_stats_df.Team == team)
+        shots_stats_df = shots_stats_df.where(shots_stats_df.Team == team)
+
     goals_stats_df\
         .coalesce(1) \
         .write \
         .format('csv').save("../tmp/EPL_goals_stats.csv", header='true')
 
-    shots_stats_df = calculate_shots_stats(statistics)
     shots_stats_df.join(goals_stats_df, "Team", "inner")\
         .withColumn("shots_accuracy", (goals_stats_df.total_scored*100)/shots_stats_df.total_shots)\
         .drop("home_scored", "home_received", "away_received", "away_scored", "total_received", "goal_diff")\
@@ -196,10 +205,15 @@ def generate_goals_statistics(statistics):
         .format('csv').save("../tmp/EPL_shots_stats.csv", header='true')
 
 
-
+def generate_disciplinary_statistics(statistics_df):
+    pass
 
 ss = create_spark_session()
-statistics_df = read_raw_data(ss)
+statistics_df = read_raw_data(ss, ui.user_interface.get_league())
 statistics_df.limit(5).show()
-generate_matches_statistics(statistics_df)
-generate_goals_statistics(statistics_df)
+
+team = ui.user_interface.get_team(statistics_df.select("HomeTeam").distinct().orderBy("HomeTeam").collect())
+if team is not None:
+    generate_matches_statistics(statistics_df, team)
+    generate_goals_statistics(statistics_df, team)
+#generate_disciplinary_statistics(statistics_df)
